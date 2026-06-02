@@ -75,7 +75,9 @@ logger.info("Service started. Model loaded: %s", model is not None)
 def home():
     return {
         "service": "Model Drift Detection",
+        "version": "2.0.0",
         "status": "running",
+        "deployed_via": "GitHub Actions CI/CD",
         "endpoints": ["/health", "/predict", "/drift", "/docs"],
     }
 
