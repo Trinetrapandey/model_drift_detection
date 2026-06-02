@@ -1,0 +1,51 @@
+# =====================================================================
+#  MAIN CI/CD PIPELINE  --  .github/workflows/ci-cd.yml
+#
+#  Runs every time you PUSH CODE to main.
+#  Stage 1 (CI): test the code.   Stage 2 (CD): deploy to EC2 if tests pass.
+#  This is for shipping CODE changes (new features, bug fixes).
+# =====================================================================
+
+name: CI-CD - Deploy on code push
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+
+  # ----- CI: prove the code is good ---------------------------------
+  test:
+    name: CI - Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest httpx flake8
+
+      - name: Train the model (creates reference/ artifacts for tests)
+        run: python train.py
+
+      - name: Lint (check code style)
+        run: flake8 . --count --max-line-length=120 --statistics
+
+      - name: Run automated tests
+        run: pytest -v
+
+  # ----- CD: deploy, only if tests passed ---------------------------
+  # We DON'T repeat the SSH steps here -- we call the reusable workflow.
+  deploy:
+    name: CD - Deploy
+    needs: test
+    uses: ./.github/workflows/deploy-to-ec2.yml
+    secrets: inherit

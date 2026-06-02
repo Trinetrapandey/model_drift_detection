@@ -1,0 +1,64 @@
+# =====================================================================
+#  REUSABLE DEPLOY WORKFLOW  --  .github/workflows/deploy-to-ec2.yml
+#
+#  This file does NOT run on its own. It is "called" by the other two
+#  workflows (ci-cd.yml and retrain.yml) so we don't copy-paste the EC2
+#  deploy steps in two places. This is a real, idiomatic GitHub Actions
+#  pattern called a "reusable workflow".
+#
+#  Whoever calls it just says:  uses: ./.github/workflows/deploy-to-ec2.yml
+# =====================================================================
+
+name: Deploy to EC2 (reusable)
+
+on:
+  workflow_call:                 # <-- means "only runs when another workflow calls me"
+    secrets:
+      EC2_HOST:
+        required: true
+      EC2_USER:
+        required: true
+      EC2_SSH_KEY:
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into EC2 and update the app
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Clone the repo the first time only.
+            if [ ! -d "/home/ubuntu/drift-detection-fastapi" ]; then
+              git clone https://github.com/Trinetrapandey/model_drift_detection.git /home/ubuntu/drift-detection-fastapi
+            fi
+
+            cd /home/ubuntu/drift-detection-fastapi
+
+            # Pull the newest code AND the newest committed model.
+            # (When a retrain promotes a new model, it is committed to the repo,
+            #  so this git pull brings the new model.pkl down to the server.)
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Refresh the virtual environment and dependencies.
+            python3 -m venv venv
+            source venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+
+            # Only train from scratch if there is genuinely no model present.
+            # Normally the model arrives via git pull (committed in the repo).
+            if [ ! -f "reference/model.pkl" ]; then
+              python train.py
+            fi
+
+            # Restart the app so the new code / new model goes live.
+            sudo systemctl restart driftapp
+
+            echo "Deployment finished successfully!"

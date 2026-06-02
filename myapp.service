@@ -1,0 +1,15 @@
+[Unit]
+Description=Model Drift Detection FastAPI Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/drift-detection-fastapi
+Environment="PATH=/home/ubuntu/drift-detection-fastapi/venv/bin"
+ExecStart=/home/ubuntu/drift-detection-fastapi/venv/bin/gunicorn app.main:app -c gunicorn_config.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

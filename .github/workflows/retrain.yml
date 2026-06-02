@@ -1,0 +1,69 @@
+# =====================================================================
+#  RETRAIN PIPELINE  --  .github/workflows/retrain.yml
+#
+#  This is the NEW flow you asked for: what happens AFTER drift is found.
+#  It retrains the model, validates it, and ONLY if the new model is better,
+#  it commits the new model and deploys it to EC2 -- all automatically.
+#
+#  It can be started in THREE ways (all free):
+#    1. Manually  -> the "Run workflow" button on the GitHub Actions tab.
+#    2. On a schedule -> e.g. every Monday (the cron line below).
+#    3. Automatically when drift is detected -> via a "repository_dispatch"
+#       event of type "drift-detected" (see monitor.py and the README).
+# =====================================================================
+
+name: Retrain - On drift, retrain & redeploy
+
+on:
+  workflow_dispatch:               # 1. manual "Run workflow" button
+  schedule:
+    - cron: "0 3 * * 1"            # 2. every Monday at 03:00 UTC
+  repository_dispatch:
+    types: [drift-detected]        # 3. fired by an API call when drift is found
+
+# The retrain job commits the new model back to the repo, so it needs write access.
+permissions:
+  contents: write
+
+jobs:
+
+  # ----- Step 1: retrain + validate (champion vs challenger) --------
+  retrain:
+    name: Retrain & validate
+    runs-on: ubuntu-latest
+    outputs:
+      promoted: ${{ steps.retrain_step.outputs.promoted }}   # 'true' or 'false'
+    steps:
+      - name: Get the code (and the current champion model)
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Retrain and validate
+        id: retrain_step
+        run: python retrain.py          # writes promoted=true/false to the output
+
+      - name: Commit the new model (only if it was promoted)
+        if: steps.retrain_step.outputs.promoted == 'true'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add reference/model.pkl reference/reference_data.csv reference/archive/ || true
+          git commit -m "Retrain: promote new model after drift [skip ci]"
+          git push
+
+  # ----- Step 2: deploy the new model, only if it was promoted ------
+  deploy:
+    name: Deploy new model
+    needs: retrain
+    if: needs.retrain.outputs.promoted == 'true'
+    uses: ./.github/workflows/deploy-to-ec2.yml
+    secrets: inherit
